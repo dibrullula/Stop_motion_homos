@@ -2,6 +2,65 @@ import heapq
 import time
 import itertools
 
+class CoreRegistryBuilder:
+    def __init__(self, manifold, faces, explorer, flow_engine):
+        """
+        Inizializza il costruttore del registro passando la varietà.
+        Crea in automatico le istanze di esplorazione e di gradiente.
+        """
+        self.manifold = manifold
+        self.faces = faces
+        
+        # Usiamo il MetricExplorer di base per costruire le fondamenta topologiche
+        self.explorer = explorer
+        self.flow_engine = flow_engine
+
+    def build_core_list(self, representative_loops, labels=None):
+        """
+        Genera il dizionario Core List contenente:
+        - Tutti i loop costanti (Classe Banale / Punti)
+        - Le traiettorie ottimali derivate dal gradiente dei loop rappresentativi
+        
+        Input:
+            - representative_loops: Lista di tuple, i loop di partenza.
+            - labels: (Opzionale) Lista di stringhe per nominare le classi 
+                      (es. ["Classe_[1, 0]", "Classe_[0, 1]"]).
+                      
+        Output:
+            - core_registry: Dizionario {geodetica_tuple: "Nome_Classe"}
+        """
+        core_registry = {}
+        
+        # 1. Aggiungiamo tutti i punti (loop costanti)
+        # Topologicamente, tutti i punti appartengono alla classe "Triviale" (Elemento Neutro)
+        print("Costruzione Core List: Aggiunta dei punti costanti...")
+        for n in self.manifold.nodes():
+            punto_canonico = self.explorer.canonicalize((n,))
+            core_registry[punto_canonico] = "Classe_Triviale"
+            
+        # Prepariamo le etichette per i loop non banali
+        if labels is None or len(labels) != len(representative_loops):
+            labels = [f"Classe_Base_{i+1}" for i in range(len(representative_loops))]
+
+        # 2. Facciamo scorrere i loop rappresentativi verso gli ottimi locali (geodetiche)
+        print(f"Costruzione Core List: Calcolo Gradient Flow per {len(representative_loops)} generatori...")
+        for loop, label in zip(representative_loops, labels):
+            
+            # AGGIORNATO: usiamo flow_to_optimum (Agnostico)
+            optimum_loop, _ = self.flow_engine.flow_to_optimum(loop, verbose=False)
+            
+            # Assicuriamoci che sia canonico
+            canon_opt = self.explorer.canonicalize(optimum_loop)
+            
+            # Salviamo nel registro
+            core_registry[canon_opt] = label
+            
+            # AGGIORNATO: usiamo get_cost (Agnostico)
+            costo = self.explorer.get_cost(canon_opt)
+        
+        # Ritorniamo anche manifold e faces come richiesto per averli a disposizione
+        return self.manifold, self.faces, core_registry
+
 class SkeletonMapper:
     def __init__(self, explorer, flow_engine, core_registry):
         """
