@@ -274,3 +274,114 @@ class LagrangianExplorer(MetricExplorer):
             current_time = t_end
             
         return action
+    def optimize_timing(self, spatial_loop, warm_start_dt=None, steps=3):
+        """
+        Ottimizzatore Temporale Ibrido.
+        Se 'warm_start_dt' è fornito, salta la stima fisica e rifinisce direttamente coi gradienti.
+        Se è None, calcola una stima cinematica da zero (Cold Start) prima del gradiente.
+        """
+        n = len(spatial_loop)
+        if n <= 1: 
+            return [self.T_total] if n == 1 else []
+
+        # ==========================================
+        # FASE 1: INIZIALIZZAZIONE (Cold Start vs Warm Start)
+        # ==========================================
+        if warm_start_dt is not None:
+            # WARM START: Ereditiamo i tempi e li normalizziamo per sicurezza
+            curr_dt = np.array(warm_start_dt)
+            curr_dt = np.maximum(curr_dt, 1e-6)
+            curr_dt *= (self.T_total / np.sum(curr_dt))
+        else:
+            # COLD START: Ricerca Dicotomica dell'Energia
+            V_pot = np.zeros(n)
+            dist_array = np.zeros(n)
+            
+            for i in range(n):
+                u, v = spatial_loop[i], spatial_loop[(i + 1) % n]
+                d = self.dist_matrix.get((u, v), 1.0) if u != v else 0.0
+                dist_array[i] = max(d, 1e-3) 
+                
+                if self.is_time_dependent:
+                    V_pot[i] = -self.L(u, 0.0, self.T_total / 2.0)
+                else:
+                    V_pot[i] = -self.L(u, 0.0)
+
+            e_min = np.max(V_pot) + 1e-4
+            e_max = e_min + 1000.0
+            
+            curr_dt = np.zeros(n)
+            for _ in range(5):
+                e_mid = (e_min + e_max) / 2.0
+                velocities = np.sqrt(2.0 * np.maximum(e_mid - V_pot, 1e-6))
+                curr_dt = dist_array / velocities
+                
+                if np.sum(curr_dt) > self.T_total: 
+                    e_min = e_mid
+                else: 
+                    e_max = e_mid
+            
+            curr_dt *= (self.T_total / np.sum(curr_dt))
+
+        # ==========================================
+        # FASE 2: GRADIENTE MATEMATICO ADATTIVO (Fine-Tuning)
+        # ==========================================
+        lr = 0.05
+        current_action = self.get_action(spatial_loop, curr_dt)
+        best_dt = curr_dt.copy()
+        best_action = current_action
+        
+        for _ in range(steps):
+            eps = 1e-4
+            grad = np.zeros(n)
+            
+            for i in range(n):
+                dt_tmp = curr_dt.copy()
+                dt_tmp[i] += eps
+                dt_tmp *= (self.T_total / np.sum(dt_tmp))
+                new_action = self.get_action(spatial_loop, dt_tmp)
+                grad[i] = (new_action - current_action) / eps
+            
+            grad -= np.mean(grad)
+            
+            # Candidate step
+            candidate_dt = curr_dt - lr * grad * curr_dt 
+            candidate_dt = np.maximum(candidate_dt, 1e-5)
+            candidate_dt *= (self.T_total / np.sum(candidate_dt))
+            
+            candidate_action = self.get_action(spatial_loop, candidate_dt)
+            
+            # Bold Driver logic
+            if candidate_action < current_action:
+                curr_dt = candidate_dt
+                current_action = candidate_action
+                lr *= 1.2
+                if current_action < best_action:
+                    best_action = current_action
+                    best_dt = curr_dt.copy()
+            else:
+                lr *= 0.5
+                
+        return list(best_dt)
+    def get_cost(self, loop):
+        """
+        Overriding di get_cost per l'esploratore lagrangiano.
+        Il costo di un loop spaziale è definito come l'Azione minima 
+        possibile su quella topologia, ottenuta ottimizzando il timing.
+        """
+        # Se il loop è vuoto, il costo è nullo
+        if not loop:
+            return 0.0
+            
+        # 1. Ottimizzazione del timing (Cold Start)
+        # Chiamiamo optimize_timing senza warm_start per trovare la 
+        # distribuzione temporale che minimizza l'azione (S).
+        opt_dt = self.optimize_timing(loop)
+        
+        # 2. Valutazione dell'Azione
+        # Calcoliamo il valore S = ∫ L dt per il timing appena trovato.
+        # Nota: usiamo get_action che è l'implementazione effettiva 
+        # della valutazione della Lagrangiana nel tempo.
+        min_action = self.get_action(loop, opt_dt)
+        
+        return min_action
