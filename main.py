@@ -148,7 +148,7 @@ for t_name in targets:
         azione = explorer_phys.get_action(opt_loop, opt_dt)
         
         print(f"  ► Geodetica: {opt_loop}")
-        print(f"  ► Tempi (dt): {[round(d, 3) for d in opt_dt]}")
+        print(f"  ► Tempi (dt): {[round(float(d), 3) for d in opt_dt]}")
         print(f"  ► Azione Finale: {azione:.4f}")
     else:
         print(f"  ⚠️ Classe non campionata durante la mappatura batch.")

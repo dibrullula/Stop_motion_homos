@@ -91,7 +91,6 @@ class SpatiotemporalGradientFlow:
         current_action = self.explorer.get_action(current_loop, current_dt)
         
         history = set()
-        new_dt = 0
         if verbose:
             print(f"\n🌊 Start Flow: {current_loop} | Azione = {current_action:.2f}")
 
